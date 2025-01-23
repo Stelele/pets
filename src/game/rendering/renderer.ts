@@ -1,5 +1,6 @@
 import { WORLD } from ".."
 import { basicFragmentShader, basicVertexShader } from "./shaders/basic"
+import { IPrimitiveObject } from "./shaders/objects/types"
 
 export class Renderer {
     private canvas!: HTMLCanvasElement
@@ -8,16 +9,7 @@ export class Renderer {
     private preferdFormat!: GPUTextureFormat
 
     // objects
-    private objects: number[][] = [
-        [
-            WORLD.width / 4, WORLD.height / 4,
-            WORLD.width / 4, 3 * WORLD.height / 4,
-            3 * WORLD.width / 4, WORLD.height / 4,
-            3 * WORLD.width / 4, WORLD.height / 4,
-            WORLD.width / 4, 3 * WORLD.height / 4,
-            3 * WORLD.width / 4, 3 * WORLD.height / 4
-        ]
-    ]
+    private objects: IPrimitiveObject[] = []
 
     // shaders
     private vertexShader!: GPUShaderModule
@@ -27,6 +19,7 @@ export class Renderer {
     private worldDimensionsBuffer!: GPUBuffer
     private screenDimensionsBuffer!: GPUBuffer
     private objectsBuffer!: GPUBuffer
+    private propsBuffer!: GPUBuffer
 
     // pipeline
     private bindGroup!: GPUBindGroup
@@ -44,11 +37,22 @@ export class Renderer {
         })
         await this.initDevice()
         this.loadShaders()
+
+        if (this.objects.length) {
+            this.setupPipeline()
+            this.setupBuffers()
+            this.setupBindGroup()
+        }
+
+        this.setupRenderPassDescriptor()
+        this.startAnimation()
+    }
+
+    public addObjects(objects: IPrimitiveObject[]) {
+        this.objects = objects
         this.setupPipeline()
         this.setupBuffers()
         this.setupBindGroup()
-        this.setupRenderPassDescriptor()
-        this.startAnimation()
     }
 
     private async initDevice() {
@@ -100,6 +104,11 @@ export class Renderer {
                     binding: 2,
                     visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
                     buffer: { type: 'read-only-storage' }
+                },
+                {
+                    binding: 3,
+                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                    buffer: { type: "read-only-storage" }
                 }
             ]
         })
@@ -136,21 +145,53 @@ export class Renderer {
         })
 
         this.setupObjectsBuffer()
+        this.setupPropsBuffer()
     }
 
     private setupObjectsBuffer() {
         const bufferSize = 2 * 4 * 6 * this.objects.length
-        if (this.objectsBuffer && this.objectsBuffer.size === bufferSize) return
-        if (this.objectsBuffer) {
-            this.objectsBuffer.destroy()
+        if (!this.objectsBuffer || this.objectsBuffer.size !== bufferSize) {
+            if (this.objectsBuffer) {
+                this.objectsBuffer.destroy()
+            }
+
+            this.objectsBuffer = this.device.createBuffer({
+                label: "Objects Buffer",
+                size: bufferSize,
+                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
+            })
+        }
+        this.device.queue.writeBuffer(this.objectsBuffer, 0, new Float32Array(this.objects.map(x => x.getVertices()).flat()))
+    }
+
+    private setupPropsBuffer() {
+        const propSize = 4 * 4 + 4 * 4
+        const bufferSize = propSize * this.objects.length
+        if (!this.propsBuffer || this.propsBuffer.size !== bufferSize) {
+            if (this.propsBuffer) {
+                this.propsBuffer.destroy()
+            }
+
+            this.propsBuffer = this.device.createBuffer({
+                label: "Props Buffer",
+                size: bufferSize,
+                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+            })
         }
 
-        this.objectsBuffer = this.device.createBuffer({
-            label: "Objects Buffer",
-            size: bufferSize,
-            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
-        })
-        this.device.queue.writeBuffer(this.objectsBuffer, 0, new Float32Array(this.objects.flat()))
+        const dataArray = new ArrayBuffer(this.propsBuffer.size)
+        for (let i = 0; i < this.objects.length; i++) {
+            const colorsData = new Float32Array(dataArray, propSize * i)
+            const typeData = new Uint32Array(dataArray, colorsData.byteOffset + 4 * 4)
+
+            colorsData[0] = this.objects[i].color[0]
+            colorsData[1] = this.objects[i].color[1]
+            colorsData[2] = this.objects[i].color[2]
+            colorsData[3] = this.objects[i].color[3]
+
+            typeData[0] = this.objects[i].type
+        }
+        this.device.queue.writeBuffer(this.propsBuffer, 0, dataArray)
     }
 
     private setupBindGroup() {
@@ -169,6 +210,10 @@ export class Renderer {
                 {
                     binding: 2,
                     resource: { buffer: this.objectsBuffer }
+                },
+                {
+                    binding: 3,
+                    resource: { buffer: this.propsBuffer }
                 }
             ]
         })
@@ -207,6 +252,8 @@ export class Renderer {
             colorAttachments.view = view
         }
         this.device.queue.writeBuffer(this.screenDimensionsBuffer, 0, new Float32Array([canvas.width, canvas.height]))
+
+        if (!this.objects.length) return
 
         const encoder = this.device.createCommandEncoder({
             label: "Encoder"
