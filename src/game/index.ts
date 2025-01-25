@@ -1,6 +1,5 @@
 import { Renderer } from "./rendering/renderer";
 import { PrimitiveObject } from "./rendering/shaders/objects/primitive";
-import { ObjectType } from "./rendering/shaders/objects/types";
 
 export const WORLD = {
     width: 800,
@@ -17,6 +16,5 @@ export async function initGame(canvas: HTMLCanvasElement) {
     obj.width = 500
     obj.height = 500
     obj.color = [0.8, 0.8, 0, 1]
-    obj.type = ObjectType.rect
     renderer.addObjects([obj])
 }

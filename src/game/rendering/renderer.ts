@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-this-alias */
 import { WORLD } from ".."
 import { basicFragmentShader, basicVertexShader } from "./shaders/basic"
-import { IPrimitiveObject } from "./shaders/objects/types"
+import { TextureFsShader, TextureVsShader } from "./shaders/objects/texture"
+import { IRenderObject, ITextureObject, ObjectType } from "./shaders/objects/types"
 
 export class Renderer {
     private canvas!: HTMLCanvasElement
@@ -9,25 +11,46 @@ export class Renderer {
     private preferdFormat!: GPUTextureFormat
 
     // objects
-    private objects: IPrimitiveObject[] = []
+    private objects: Record<ObjectType, IRenderObject[]> = {
+        primitive: [],
+        texture: [],
+    }
 
     // shaders
-    private vertexShader!: GPUShaderModule
-    private fragmentShader!: GPUShaderModule
+    private shaders: Record<ObjectType, Record<"vert" | "frag", GPUShaderModule>> = {
+        "primitive": undefined,
+        "texture": undefined,
+    }
 
     // buffers
     private worldDimensionsBuffer!: GPUBuffer
     private screenDimensionsBuffer!: GPUBuffer
-    private objectsBuffer!: GPUBuffer
-    private propsBuffer!: GPUBuffer
+    private objectsBuffer: Record<ObjectType, GPUBuffer> = {
+        "primitive": undefined,
+        "texture": undefined,
+    }
+    private propsBuffer: Record<ObjectType, GPUBuffer> = {
+        "primitive": undefined,
+        "texture": undefined,
+    }
 
     // pipeline
-    private bindGroup!: GPUBindGroup
-    private bindGroupLayout!: GPUBindGroupLayout
-    private pipeline!: GPURenderPipeline
+    private bindGroups: Record<ObjectType, GPUBindGroup> = {
+        primitive: undefined,
+        texture: undefined,
+    }
+    private bindGroupLayouts: Record<ObjectType, GPUBindGroupLayout> = {
+        primitive: undefined,
+        texture: undefined,
+    }
+    private pipelines: Record<ObjectType, GPURenderPipeline> = {
+        primitive: undefined,
+        texture: undefined,
+    }
 
     // rendering
     private renderPassDescriptor!: GPURenderPassDescriptor
+    private sampler!: GPUSampler
 
     public async init(canvas: HTMLCanvasElement) {
         this.canvas = canvas
@@ -36,23 +59,54 @@ export class Renderer {
             canvas.height = window.innerHeight
         })
         await this.initDevice()
-        this.loadShaders()
 
-        if (this.objects.length) {
-            this.setupPipeline()
-            this.setupBuffers()
-            this.setupBindGroup()
-        }
-
+        this.setupShaders()
+        this.setupPipeLines()
         this.setupRenderPassDescriptor()
         this.startAnimation()
     }
 
-    public addObjects(objects: IPrimitiveObject[]) {
-        this.objects = objects
-        this.setupPipeline()
+    public addObjects(objects: IRenderObject[]) {
+        this.objects.primitive = []
+        this.objects.texture = []
+        for (const object of objects) {
+            switch (object.type) {
+                case "primitive": {
+                    this.objects.primitive.push(object)
+                    break
+                }
+                case "texture": {
+                    this.objects.texture.push(object)
+                    break
+                }
+            }
+        }
+
         this.setupBuffers()
-        this.setupBindGroup()
+    }
+
+    private setupShaders() {
+        this.shaders["primitive"] = {
+            vert: this.device.createShaderModule({
+                label: "Primitive Vertex Shader",
+                code: basicVertexShader,
+            }),
+            frag: this.device.createShaderModule({
+                label: "Primitive Fragment Shader",
+                code: basicFragmentShader,
+            })
+        }
+
+        this.shaders["texture"] = {
+            vert: this.device.createShaderModule({
+                label: "Texture Vertex Shader",
+                code: TextureVsShader,
+            }),
+            frag: this.device.createShaderModule({
+                label: "Texture Fragment Shader",
+                code: TextureFsShader,
+            })
+        }
     }
 
     private async initDevice() {
@@ -74,60 +128,110 @@ export class Renderer {
 
     }
 
-    private loadShaders() {
-        this.vertexShader = this.device.createShaderModule({
-            label: "Vertex Shader",
-            code: basicVertexShader
-        })
+    private setupPipeLines() {
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const renderer = this
+        setupPrimitivePipeLine()
+        setupTexturePipeline()
 
-        this.fragmentShader = this.device.createShaderModule({
-            label: "Fragment Shader",
-            code: basicFragmentShader,
-        })
-    }
+        function setupPrimitivePipeLine() {
+            renderer.bindGroupLayouts["primitive"] = renderer.device.createBindGroupLayout({
+                label: "Primitive Bind Group Layout",
+                entries: [
+                    {
+                        binding: 0,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        buffer: { type: "uniform" }
+                    },
+                    {
+                        binding: 1,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        buffer: { type: "uniform" }
+                    },
+                    {
+                        binding: 2,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        buffer: { type: 'read-only-storage' }
+                    },
+                    {
+                        binding: 3,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        buffer: { type: "read-only-storage" }
+                    }
+                ]
+            })
 
-    private setupPipeline() {
-        this.bindGroupLayout = this.device.createBindGroupLayout({
-            label: "Bind Group Layout",
-            entries: [
-                {
-                    binding: 0,
-                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-                    buffer: { type: "uniform" }
+            const pipelineLayout = renderer.device.createPipelineLayout({
+                label: "Pipeline Layout",
+                bindGroupLayouts: [renderer.bindGroupLayouts["primitive"]]
+            })
+            renderer.pipelines["primitive"] = renderer.device.createRenderPipeline({
+                label: "Render Pipeline",
+                layout: pipelineLayout,
+                vertex: {
+                    module: renderer.shaders["primitive"].vert
                 },
-                {
-                    binding: 1,
-                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-                    buffer: { type: "uniform" }
-                },
-                {
-                    binding: 2,
-                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-                    buffer: { type: 'read-only-storage' }
-                },
-                {
-                    binding: 3,
-                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-                    buffer: { type: "read-only-storage" }
+                fragment: {
+                    module: renderer.shaders["primitive"].frag,
+                    targets: [{ format: renderer.preferdFormat }]
                 }
-            ]
-        })
+            })
+        }
 
-        const pipelineLayout = this.device.createPipelineLayout({
-            label: "Pipeline Layout",
-            bindGroupLayouts: [this.bindGroupLayout]
-        })
-        this.pipeline = this.device.createRenderPipeline({
-            label: "Render Pipeline",
-            layout: pipelineLayout,
-            vertex: {
-                module: this.vertexShader
-            },
-            fragment: {
-                module: this.fragmentShader,
-                targets: [{ format: this.preferdFormat }]
-            }
-        })
+        function setupTexturePipeline() {
+            renderer.bindGroupLayouts["texture"] = renderer.device.createBindGroupLayout({
+                label: "Texture Bind Group Layout",
+                entries: [
+                    {
+                        binding: 0,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        buffer: { type: "uniform" }
+                    },
+                    {
+                        binding: 1,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        buffer: { type: "uniform" }
+                    },
+                    {
+                        binding: 2,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        buffer: { type: 'read-only-storage' }
+                    },
+                    {
+                        binding: 3,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        sampler: {}
+                    },
+                    {
+                        binding: 4,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        texture: {}
+                    },
+                    {
+                        binding: 5,
+                        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                        buffer: { type: 'read-only-storage' }
+                    }
+                ]
+            })
+
+            const pipelineLayout = renderer.device.createPipelineLayout({
+                label: "Texture Pipeline Layout",
+                bindGroupLayouts: [renderer.bindGroupLayouts["texture"]]
+            })
+
+            renderer.pipelines["texture"] = renderer.device.createRenderPipeline({
+                label: "Texture Pipeline",
+                layout: pipelineLayout,
+                vertex: {
+                    module: renderer.shaders["texture"].vert
+                },
+                fragment: {
+                    module: renderer.shaders["texture"].frag,
+                    targets: [{ format: renderer.preferdFormat }]
+                }
+            })
+        }
     }
 
     private setupBuffers() {
@@ -145,78 +249,168 @@ export class Renderer {
         })
 
         this.setupObjectsBuffer()
-        this.setupPropsBuffer()
     }
 
     private setupObjectsBuffer() {
-        const bufferSize = 2 * 4 * 6 * this.objects.length
-        if (!this.objectsBuffer || this.objectsBuffer.size !== bufferSize) {
-            if (this.objectsBuffer) {
-                this.objectsBuffer.destroy()
-            }
-
-            this.objectsBuffer = this.device.createBuffer({
-                label: "Objects Buffer",
-                size: bufferSize,
-                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
-            })
-        }
-        this.device.queue.writeBuffer(this.objectsBuffer, 0, new Float32Array(this.objects.map(x => x.getVertices()).flat()))
-    }
-
-    private setupPropsBuffer() {
-        const propSize = 4 * 4 + 4 * 4
-        const bufferSize = propSize * this.objects.length
-        if (!this.propsBuffer || this.propsBuffer.size !== bufferSize) {
-            if (this.propsBuffer) {
-                this.propsBuffer.destroy()
-            }
-
-            this.propsBuffer = this.device.createBuffer({
-                label: "Props Buffer",
-                size: bufferSize,
-                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
-            })
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const renderer = this
+        if (this.objects["primitive"].length) {
+            setupPrimitiveObjectsBuffer()
         }
 
-        const dataArray = new ArrayBuffer(this.propsBuffer.size)
-        for (let i = 0; i < this.objects.length; i++) {
-            const colorsData = new Float32Array(dataArray, propSize * i)
-            const typeData = new Uint32Array(dataArray, colorsData.byteOffset + 4 * 4)
-
-            colorsData[0] = this.objects[i].color[0]
-            colorsData[1] = this.objects[i].color[1]
-            colorsData[2] = this.objects[i].color[2]
-            colorsData[3] = this.objects[i].color[3]
-
-            typeData[0] = this.objects[i].type
+        if (this.objects["texture"].length) {
+            setupTextureObjectsBuffer()
         }
-        this.device.queue.writeBuffer(this.propsBuffer, 0, dataArray)
-    }
 
-    private setupBindGroup() {
-        this.bindGroup = this.device.createBindGroup({
-            label: "Bind Group",
-            layout: this.bindGroupLayout,
-            entries: [
-                {
-                    binding: 0,
-                    resource: { buffer: this.worldDimensionsBuffer }
-                },
-                {
-                    binding: 1,
-                    resource: { buffer: this.screenDimensionsBuffer }
-                },
-                {
-                    binding: 2,
-                    resource: { buffer: this.objectsBuffer }
-                },
-                {
-                    binding: 3,
-                    resource: { buffer: this.propsBuffer }
+        function setupPrimitiveObjectsBuffer() {
+            const objectsBufferSize = 2 * 4 * 6 * renderer.objects["primitive"].length
+            if (!renderer.objectsBuffer["primitive"] || renderer.objectsBuffer["primitive"].size !== objectsBufferSize) {
+                if (renderer.objectsBuffer["primitive"]) {
+                    renderer.objectsBuffer["primitive"].destroy()
                 }
-            ]
-        })
+
+                renderer.objectsBuffer["primitive"] = renderer.device.createBuffer({
+                    label: "Primitive Objects Buffer",
+                    size: objectsBufferSize,
+                    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
+                })
+            }
+            renderer.device.queue.writeBuffer(
+                renderer.objectsBuffer["primitive"],
+                0,
+                new Float32Array(renderer.objects["primitive"].map(x => x.getVertices()).flat())
+            )
+
+            const propsBufferSize = 4 * 4 * renderer.objects["primitive"].length
+            if (!renderer.propsBuffer["primitive"] || renderer.propsBuffer["primitive"].size !== propsBufferSize) {
+                if (renderer.propsBuffer["primitive"]) {
+                    renderer.propsBuffer["primitive"].destroy()
+                }
+
+                renderer.propsBuffer["primitive"] = renderer.device.createBuffer({
+                    label: "Props Buffer",
+                    size: propsBufferSize,
+                    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+                })
+            }
+
+            const propsArray = new Float32Array(
+                renderer.objects["primitive"].map(x => x.color).flat()
+            )
+            renderer.device.queue.writeBuffer(renderer.propsBuffer["primitive"], 0, propsArray)
+        }
+
+        function setupTextureObjectsBuffer() {
+            if (!renderer.sampler) {
+                renderer.sampler = renderer.device.createSampler({
+                    label: "Texture Sampler",
+                    addressModeU: "repeat",
+                    addressModeV: "repeat",
+                    magFilter: "nearest",
+                    minFilter: "nearest",
+                })
+            }
+
+            for (const obj of renderer.objects["texture"] as ITextureObject[]) {
+                obj.texture = renderer.device.createTexture({
+                    label: `Texture: ${obj.label}`,
+                    format: "rgba8uint",
+                    size: [obj.image.width, obj.image.height],
+                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+                })
+                renderer.device.queue.copyExternalImageToTexture(
+                    { source: obj.image, flipY: true },
+                    { texture: obj.texture },
+                    { width: obj.image.width, height: obj.image.height }
+                )
+
+                const uvs = new Float32Array(obj.getUVs())
+                obj.uvsBuffer = renderer.device.createBuffer({
+                    label: `Texture UV Buffer: ${obj.label}`,
+                    size: uvs.byteLength,
+                    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
+                })
+                renderer.device.queue.writeBuffer(obj.uvsBuffer, 0, uvs)
+
+                const vertices = new Float32Array(obj.getVertices())
+                obj.verticesBuffer = renderer.device.createBuffer({
+                    label: `Texture Vertex Buffer: ${obj.label}`,
+                    size: uvs.byteLength,
+                    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
+                })
+                renderer.device.queue.writeBuffer(obj.verticesBuffer, 0, vertices)
+            }
+        }
+    }
+
+    private getBindGroup(object: IRenderObject) {
+        const renderer = this
+
+        switch (object.type) {
+            case "primitive":
+                return getPrimitiveBindGroup()
+            case "texture":
+                return getTextureBindGroup()
+
+        }
+
+        function getPrimitiveBindGroup() {
+            return renderer.device.createBindGroup({
+                label: "Primitive Bind Group",
+                layout: renderer.bindGroupLayouts["primitive"],
+                entries: [
+                    {
+                        binding: 0,
+                        resource: { buffer: renderer.worldDimensionsBuffer }
+                    },
+                    {
+                        binding: 1,
+                        resource: { buffer: renderer.screenDimensionsBuffer }
+                    },
+                    {
+                        binding: 2,
+                        resource: { buffer: renderer.objectsBuffer["primitive"] }
+                    },
+                    {
+                        binding: 3,
+                        resource: { buffer: renderer.propsBuffer["primitive"] }
+                    }
+                ]
+            })
+        }
+
+        function getTextureBindGroup() {
+            return renderer.device.createBindGroup({
+                label: "Texture Bind Group",
+                layout: renderer.bindGroupLayouts["texture"],
+                entries: [
+                    {
+                        binding: 0,
+                        resource: { buffer: renderer.worldDimensionsBuffer }
+                    },
+                    {
+                        binding: 1,
+                        resource: { buffer: renderer.screenDimensionsBuffer }
+                    },
+                    {
+                        binding: 2,
+                        resource: { buffer: (object as ITextureObject).verticesBuffer }
+                    },
+                    {
+                        binding: 3,
+                        resource: renderer.sampler,
+                    },
+                    {
+                        binding: 4,
+                        resource: (object as ITextureObject).texture.createView(),
+                    },
+                    {
+                        binding: 5,
+                        resource: { buffer: (object as ITextureObject).uvsBuffer }
+                    }
+                ]
+            })
+        }
     }
 
     private setupRenderPassDescriptor() {
@@ -253,17 +447,27 @@ export class Renderer {
         }
         this.device.queue.writeBuffer(this.screenDimensionsBuffer, 0, new Float32Array([canvas.width, canvas.height]))
 
-        if (!this.objects.length) return
+        if (!Object.values(this.objects).flat().length) return
 
         const encoder = this.device.createCommandEncoder({
             label: "Encoder"
         })
         const pass = encoder.beginRenderPass(this.renderPassDescriptor)
 
-        pass.setPipeline(this.pipeline)
-        pass.setBindGroup(0, this.bindGroup)
+        if (this.objects["primitive"].length) {
+            pass.setPipeline(this.pipelines["primitive"])
+            pass.setBindGroup(0, this.getBindGroup(this.objects["primitive"][0]))
 
-        pass.draw(6, this.objects.length)
+            pass.draw(6, this.objects["primitive"].length)
+        }
+
+        if (this.objects["texture"].length) {
+            pass.setPipeline(this.pipelines["texture"])
+            for (const obj of this.objects['texture']) {
+                pass.setBindGroup(0, this.getBindGroup(obj))
+                pass.draw(6)
+            }
+        }
 
         pass.end()
         this.device.queue.submit([encoder.finish()])

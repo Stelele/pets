@@ -1,4 +1,4 @@
-import { IPrimitiveObject, ObjectType } from "./types";
+import { IPrimitiveObject } from "./types";
 
 export class PrimitiveObject implements IPrimitiveObject {
     public label: string;
@@ -6,8 +6,14 @@ export class PrimitiveObject implements IPrimitiveObject {
     public height: number;
     public x: number;
     public y: number;
-    public type: ObjectType;
+    public type: "primitive";
     public color: number[];
+
+    public constructor() {
+        this.type = "primitive"
+        this.x = 0
+        this.y = 0
+    }
 
     public getVertices() {
         return [
