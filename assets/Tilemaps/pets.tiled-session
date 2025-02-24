@@ -3,7 +3,7 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "",
+    "activeFile": "test-map.tmx",
     "expandedProjectPaths": [
         "."
     ],
@@ -42,11 +42,11 @@
             "scaleInEditor": 1
         },
         "test-map.tmx": {
-            "scale": 1,
-            "selectedLayer": 0,
+            "scale": 2,
+            "selectedLayer": 1,
             "viewCenter": {
-                "x": 314,
-                "y": 229
+                "x": 140.5,
+                "y": 167.5
             }
         }
     },
@@ -57,6 +57,7 @@
     "map.tileHeight": 16,
     "map.tileWidth": 16,
     "openFiles": [
+        "test-map.tmx"
     ],
     "project": "pets.tiled-project",
     "recentFiles": [
