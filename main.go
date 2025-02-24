@@ -15,6 +15,8 @@ func main() {
 
 	rl.SetTargetFPS(60)
 
+	rl.SetWindowState(rl.FlagWindowResizable)
+
 	g.InitAsset()
 
 	for !rl.WindowShouldClose() {

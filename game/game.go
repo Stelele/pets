@@ -2,10 +2,10 @@ package game
 
 import (
 	"encoding/xml"
-	"fmt"
 	"io"
 	"os"
 	"pets/game/types"
+	"strconv"
 	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -16,7 +16,28 @@ var testScene types.TileMap
 const basePath = "assets"
 
 func InitAsset() {
-	sceneFile, _ := os.Open(basePath + "/Tilemaps/test-map.tmx")
+	var fileName = basePath + "/Tilemaps/test-map.tmx"
+
+	loadSceneData(fileName)
+
+}
+
+func getTileSet(tile int32) types.TileSet {
+	var tileSet types.TileSet
+	for _, curTileSet := range testScene.TileSets {
+		min := curTileSet.FirstGId
+		max := curTileSet.FirstGId + curTileSet.TileCount
+		if tile >= min && tile < max {
+			tileSet = curTileSet
+			break
+		}
+	}
+
+	return tileSet
+}
+
+func loadSceneData(fileName string) {
+	sceneFile, _ := os.Open(fileName)
 	defer sceneFile.Close()
 
 	b, _ := io.ReadAll(sceneFile)
@@ -41,8 +62,6 @@ func InitAsset() {
 		testScene.TileSets[idx].Image.Texture = rl.LoadTexture(basePath + "/" + testScene.TileSets[idx].Image.Source)
 	}
 
-	fmt.Print(testScene)
-
 }
 
 func Update() {
@@ -50,5 +69,37 @@ func Update() {
 }
 
 func Draw() {
+	for _, layer := range testScene.Layers {
+		tilesData := strings.Split(strings.ReplaceAll(layer.Data, "\n", ""), ",")
 
+		for y := range testScene.Height {
+			for x := range testScene.Width {
+				pos := rl.Vector2{
+					X: float32(x * testScene.TileWidth),
+					Y: float32(y * testScene.TileHeight),
+				}
+
+				idx := (y * testScene.Width) + x
+
+				tile, _ := strconv.Atoi(tilesData[idx])
+				if tile < 1 {
+					continue
+				}
+
+				tileSet := getTileSet(int32(tile))
+
+				u := int32(int32(tile)-tileSet.FirstGId) % tileSet.Columns
+				v := int32(int32(tile)-tileSet.FirstGId) / tileSet.Columns
+
+				slice := rl.Rectangle{
+					X:      float32(u * tileSet.TileWidth),
+					Y:      float32(v * tileSet.TileHeight),
+					Width:  float32(tileSet.TileWidth),
+					Height: float32(tileSet.TileHeight),
+				}
+
+				rl.DrawTextureRec(tileSet.Image.Texture, slice, pos, rl.White)
+			}
+		}
+	}
 }
